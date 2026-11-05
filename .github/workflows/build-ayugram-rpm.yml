@@ -1,0 +1,210 @@
+name: Build AyuGram Desktop RPM
+
+# Builds AyuGram Desktop from the upstream "full" source tree and publishes an
+# .rpm as a release asset. Uses the same centos_env image the upstream Linux
+# build instructions use, so no host toolchain is involved.
+#
+# Trigger: Actions -> this workflow -> Run workflow (or push a tag).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream git ref to build"
+        required: true
+        default: "dev"
+      rpm_version:
+        description: "Version string for the rpm (empty = read from source)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "build-*"
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: https://github.com/AyuGram/AyuGramDesktop.git
+  API_ID: "2040"
+  API_HASH: b18441a1ff607e10a989891a5462e627
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: false
+          swap-storage: false
+
+      - name: Show resources
+        run: |
+          nproc; free -g; df -h /
+
+      - name: Clone upstream with submodules
+        run: |
+          REF="${{ github.event.inputs.ref || 'dev' }}"
+          # a full clone: shallow clones of this repo break submodules pinned to
+          # commits that are not the branch tip ("reference is not a tree")
+          git clone --recursive --jobs 8 --branch "$REF" "$UPSTREAM" tdesktop
+          cd tdesktop
+          git log -1 --format='%H %ad %s'
+          git submodule status --recursive | head -30
+
+      - name: Build (centos_env image, same as upstream docs)
+        working-directory: tdesktop
+        run: |
+          # -u 0 keeps the container writable for the bind mount; the tree is
+          # a throwaway checkout inside the runner.
+          docker run --rm -u 0 \
+            -v "$PWD:/usr/src/tdesktop" \
+            -e CONFIG=Release \
+            -e CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) \
+            ghcr.io/telegramdesktop/tdesktop/centos_env:latest \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -D TDESKTOP_API_ID=$API_ID \
+            -D TDESKTOP_API_HASH=$API_HASH
+          ls -lh out/Release/AyuGram
+          file out/Release/AyuGram
+
+      - name: Package RPM
+        run: |
+          mkdir -p dist
+          VERSION="${{ github.event.inputs.rpm_version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(sed -n 's/^AppVersionStrSmall[[:space:]]*//p' tdesktop/Telegram/build/version | tr -d '[:space:]')
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+          # Everything the spec needs, staged outside the container.
+          mkdir -p stage
+          install -m 755 tdesktop/out/Release/AyuGram stage/AyuGram
+          cp tdesktop/lib/xdg/com.ayugram.desktop.desktop stage/
+          cp tdesktop/lib/xdg/com.ayugram.desktop.metainfo.xml stage/
+          sed 's|@CMAKE_INSTALL_FULL_BINDIR@|/usr/bin|' \
+              tdesktop/lib/xdg/com.ayugram.desktop.service > stage/com.ayugram.desktop.service
+          for sz in 16 32 48 64 128 256 512; do
+            cp "tdesktop/Telegram/Resources/art/icon${sz}.png" stage/
+          done
+          tar -C stage -czf stage.tgz .
+          ls -lh stage.tgz
+
+          docker run --rm -u 0 -e VERSION="$VERSION" -v "$PWD:/w" -w /w fedora:latest bash -lc '
+            set -euo pipefail
+            dnf -y -q install rpm-build binutils >/dev/null
+            mkdir -p /tmp/r/sources
+            tar -C /tmp/r/sources -xzf /w/stage.tgz
+            cd /tmp/r/sources
+            install -d /tmp/r/BUILD /tmp/r/RPMS /tmp/r/BUILDROOT /tmp/r/SPECS
+
+            # strip before packaging: brp-strip would need a full toolchain
+            strip --strip-unneeded AyuGram
+            REQ=""
+            for s in $(ldd AyuGram | awk "/=>/ {print \$1}" | sort -u); do
+              case "$s" in
+                libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libmvec.so.*|libresolv.so.*|libutil.so.*) continue ;;
+              esac
+              REQ="${REQ}Requires:       ${s}\n"
+            done
+
+            cat > /tmp/r/SPECS/ayugram-desktop.spec <<SPEC
+          Name:           ayugram-desktop
+          Version:        ${VERSION}
+          Release:        1%{?dist}
+          Summary:        AyuGram Desktop - Telegram Desktop fork with Ghost mode
+          License:        GPL-3.0-or-later
+          URL:            https://github.com/AyuGram/AyuGramDesktop
+          Source0:        AyuGram
+          Source1:        com.ayugram.desktop.desktop
+          Source2:        com.ayugram.desktop.metainfo.xml
+          Source3:        com.ayugram.desktop.service
+          Source4:        icon16.png
+          Source5:        icon32.png
+          Source6:        icon48.png
+          Source7:        icon64.png
+          Source8:        icon128.png
+          Source9:        icon256.png
+          Source10:       icon512.png
+          BuildArch:      x86_64
+          AutoReqProv:    no
+          $(printf "%b" "$REQ")Requires:       glibc >= 2.28
+
+          %description
+          AyuGram Desktop is an unofficial Telegram Desktop fork with Ghost mode,
+          anti-recall and extended customisation. Linux build.
+
+          %prep
+          %build
+          %install
+          umask 022
+          install -d %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications \
+                     %{buildroot}%{_datadir}/metainfo %{buildroot}%{_datadir}/dbus-1/services
+          for d in 16x16 32x32 48x48 64x64 128x128 256x256 512x512; do
+            install -d %{buildroot}%{_datadir}/icons/hicolor/\$d/apps
+          done
+          install -m 0755 %{SOURCE0} %{buildroot}%{_bindir}/AyuGram
+          install -m 0644 %{SOURCE1} %{buildroot}%{_datadir}/applications/
+          install -m 0644 %{SOURCE2} %{buildroot}%{_datadir}/metainfo/
+          install -m 0644 %{SOURCE3} %{buildroot}%{_datadir}/dbus-1/services/
+          install -m 0644 %{SOURCE4} %{buildroot}%{_datadir}/icons/hicolor/16x16/apps/com.ayugram.desktop.png
+          install -m 0644 %{SOURCE5} %{buildroot}%{_datadir}/icons/hicolor/32x32/apps/com.ayugram.desktop.png
+          install -m 0644 %{SOURCE6} %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/com.ayugram.desktop.png
+          install -m 0644 %{SOURCE7} %{buildroot}%{_datadir}/icons/hicolor/64x64/apps/com.ayugram.desktop.png
+          install -m 0644 %{SOURCE8} %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/com.ayugram.desktop.png
+          install -m 0644 %{SOURCE9} %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/com.ayugram.desktop.png
+          install -m 0644 %{SOURCE10} %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/com.ayugram.desktop.png
+
+          %post
+          [ -x /usr/bin/gtk-update-icon-cache ] && /usr/bin/gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor 2>/dev/null || :
+          [ -x /usr/bin/update-desktop-database ] && /usr/bin/update-desktop-database -q %{_datadir}/applications 2>/dev/null || :
+
+          %postun
+          [ -x /usr/bin/gtk-update-icon-cache ] && /usr/bin/gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor 2>/dev/null || :
+
+          %files
+          %{_bindir}/AyuGram
+          %{_datadir}/applications/com.ayugram.desktop.desktop
+          %{_datadir}/metainfo/com.ayugram.desktop.metainfo.xml
+          %{_datadir}/dbus-1/services/com.ayugram.desktop.service
+          %{_datadir}/icons/hicolor/*/apps/com.ayugram.desktop.png
+
+          %changelog
+          * Thu Nov 05 2026 CI <ci@localhost> - ${VERSION}-1
+          - Built from upstream sources
+          SPEC
+            rpmbuild -bb --define "_topdir /tmp/r" --define "debug_package %{nil}" \
+                     /tmp/r/SPECS/ayugram-desktop.spec
+            cp /tmp/r/RPMS/x86_64/*.rpm /w/dist/
+          '
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ayugram-desktop-rpm-${{ env.VERSION }}
+          path: dist/*.rpm
+          retention-days: 14
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${{ env.VERSION }}-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" dist/*.rpm \
+            --title "AyuGram Desktop ${VERSION} RPM" \
+            --notes "Built from ${{ github.event.inputs.ref || 'dev' }} on $(date -u +%F)." \
+            --repo "$GITHUB_REPOSITORY"
+          echo "RELEASE_URL=https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_ENV"
+
+      - name: Summary
+        run: |
+          {
+            echo "### AyuGram Desktop $VERSION"
+            echo ""
+            echo "- source ref: \`${{ github.event.inputs.ref || 'dev' }}\`"
+            echo "- release: $RELEASE_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
