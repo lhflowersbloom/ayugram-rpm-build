@@ -55,19 +55,49 @@ jobs:
           git log -1 --format='%H %ad %s'
           git submodule status --recursive | head -30
 
+      - name: Build tlottie static lib
+        # The published centos_env image has tlottie.h but no libtlottie.a
+        # (its build history has no tlottie stage), so AyuGram's tree cannot
+        # configure against it. Rebuild the lib exactly as the Dockerfile does.
+        run: |
+          mkdir -p lottie
+          IMG=rust:1.96.1
+          docker pull -q "$IMG" || IMG=rust:latest
+          echo "using $IMG"
+          docker run --rm -v "$PWD/lottie:/out" -w /src "$IMG" bash -eo pipefail -c '
+            apt-get update -qq && apt-get install -y -qq git curl binutils >/dev/null
+            curl -sSLo /src/tlottie.patch https://raw.githubusercontent.com/desktop-app/patches/519aaa084608fa6f9a2bfbd1959d133c44d94227/tlottie.patch
+            git init t && cd t
+            git remote add origin https://github.com/dkaraush/tlottie.git
+            git fetch --depth=1 origin 31f1b542f88e7b4be9a01e749920d857535fc715
+            git reset --hard FETCH_HEAD
+            git apply /src/tlottie.patch
+            cargo rustc --lib --release --locked --features c-api \
+                        --crate-type staticlib --target x86_64-unknown-linux-gnu
+            objcopy --strip-debug target/x86_64-unknown-linux-gnu/release/libtlottie.a /out/libtlottie.a
+            mkdir -p /out/include && cp include/tlottie.h /out/include/
+          '
+          ls -lh lottie/
+
       - name: Build (centos_env image, same as upstream docs)
         working-directory: tdesktop
         run: |
-          # -u 0 keeps the container writable for the bind mount; the tree is
-          # a throwaway checkout inside the runner.
           docker run --rm -u 0 \
             -v "$PWD:/usr/src/tdesktop" \
+            -v "$PWD/../lottie:/usr/src/lottie" \
             -e CONFIG=Release \
+            -e API_ID="$API_ID" \
+            -e API_HASH="$API_HASH" \
             -e CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) \
             ghcr.io/telegramdesktop/tdesktop/centos_env:latest \
-            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
-            -D TDESKTOP_API_ID=$API_ID \
-            -D TDESKTOP_API_HASH=$API_HASH
+            bash -lc '
+              set -e
+              install -D -m0644 /usr/src/lottie/libtlottie.a /usr/local/lib/libtlottie.a
+              install -D -m0644 /usr/src/lottie/include/tlottie.h /usr/local/include/tlottie/tlottie.h
+              exec /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+                -D TDESKTOP_API_ID=$API_ID \
+                -D TDESKTOP_API_HASH=$API_HASH
+            '
           ls -lh out/Release/AyuGram
           file out/Release/AyuGram
 
