@@ -101,13 +101,23 @@ jobs:
           ls -lh out/Release/AyuGram
           file out/Release/AyuGram
 
+      - name: Upload raw binary
+        # Keep the compiled binary before packaging: a packaging bug must not
+        # throw away a two hour build again.
+        run: |
+          VERSION=$(sed -n 's/^AppVersionStrSmall[[:space:]]*//p' tdesktop/Telegram/build/version | tr -d '[:space:]')
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p dist
+          strip --strip-unneeded tdesktop/out/Release/AyuGram
+          cp tdesktop/out/Release/AyuGram dist/AyuGram
+          tar -C dist -czf "dist/AyuGram-${VERSION}-linux-x86_64.tar.gz" AyuGram
+          ls -lh dist/
+        continue-on-error: true
+
       - name: Package RPM
         run: |
           mkdir -p dist
-          VERSION="${{ github.event.inputs.rpm_version }}"
-          if [ -z "$VERSION" ]; then
-            VERSION=$(sed -n 's/^AppVersionStrSmall[[:space:]]*//p' tdesktop/Telegram/build/version | tr -d '[:space:]')
-          fi
+          VERSION="${VERSION:-$(sed -n 's/^AppVersionStrSmall[[:space:]]*//p' tdesktop/Telegram/build/version | tr -d '[:space:]')}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
           # Everything the spec needs, staged outside the container.
@@ -126,10 +136,10 @@ jobs:
           docker run --rm -u 0 -e VERSION="$VERSION" -v "$PWD:/w" -w /w fedora:latest bash -lc '
             set -euo pipefail
             dnf -y -q install rpm-build binutils >/dev/null
-            mkdir -p /tmp/r/sources
-            tar -C /tmp/r/sources -xzf /w/stage.tgz
-            cd /tmp/r/sources
-            install -d /tmp/r/BUILD /tmp/r/RPMS /tmp/r/BUILDROOT /tmp/r/SPECS
+            # rpmbuild resolves %{SOURCESx} under <topdir>/SOURCES (uppercase)
+            mkdir -p /tmp/r/SOURCES /tmp/r/BUILD /tmp/r/RPMS /tmp/r/BUILDROOT /tmp/r/SPECS
+            tar -C /tmp/r/SOURCES -xzf /w/stage.tgz
+            cd /tmp/r/SOURCES
 
             # strip before packaging: brp-strip would need a full toolchain
             strip --strip-unneeded AyuGram
