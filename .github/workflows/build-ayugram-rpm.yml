@@ -171,7 +171,8 @@ jobs:
           Source10:       icon512.png
           BuildArch:      x86_64
           AutoReqProv:    no
-          $(printf "%b" "$REQ")Requires:       glibc >= 2.28
+          $(printf "%b" "$REQ")
+          Requires:       glibc >= 2.28
 
           %description
           AyuGram Desktop is an unofficial Telegram Desktop fork with Ghost mode,
@@ -226,7 +227,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ayugram-desktop-rpm-${{ env.VERSION }}
-          path: dist/*.rpm
+          path: |
+            dist/*.rpm
+            dist/*.tar.gz
           retention-days: 14
 
       - name: Publish release
@@ -234,7 +237,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="build-${{ env.VERSION }}-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" dist/*.rpm \
+          gh release create "$TAG" dist/*.rpm dist/AyuGram-*.tar.gz \
             --title "AyuGram Desktop ${VERSION} RPM" \
             --notes "Built from ${{ github.event.inputs.ref || 'dev' }} on $(date -u +%F)." \
             --repo "$GITHUB_REPOSITORY"
