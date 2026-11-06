@@ -282,18 +282,17 @@ jobs:
         # soname requirement, and the binary has to link once installed.
         run: |
           docker run --rm -v "$PWD/dist:/d:ro" -w /d fedora:latest bash -lc '
-            set -euo pipefail
+            set -eu
             RPM=$(ls *.rpm)
-            echo "--- info ---";    rpm -qpi "$RPM" | head -12
-            echo "--- requires ---"; rpm -qp --requires "$RPM" | grep -v "^rpmlib"
-            echo "--- files ---";   rpm -qplv "$RPM"
+            echo "--- info ---";     rpm -qpi "$RPM"
+            echo "--- requires ---"; rpm -qp --requires "$RPM" | grep -v "^rpmlib" || true
+            echo "--- files ---";    rpm -qplv "$RPM"
             echo "--- install ---"
             dnf -y -q install "./$RPM"
             test -x /usr/bin/AyuGram
             if ldd /usr/bin/AyuGram | grep "not found"; then
               echo "unresolved libraries"; exit 1
             fi
-            /usr/bin/AyuGram -version 2>/dev/null || true
             echo "install + link OK"
           '
 
