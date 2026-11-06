@@ -1,28 +1,33 @@
 name: Build AyuGram Desktop RPM
 
-# Builds AyuGram Desktop from the upstream "full" source tree and publishes an
-# .rpm as a release asset. Uses the same centos_env image the upstream Linux
-# build instructions use, so no host toolchain is involved.
+# Compiles AyuGram Desktop from upstream sources and publishes a Fedora .rpm.
 #
-# Trigger: Actions -> this workflow -> Run workflow (or push a tag).
+# Triggers:
+#   - schedule: once a day, build only if upstream released a version we have
+#               not packaged yet
+#   - workflow_dispatch: force a build (leave "ref" empty for the latest
+#               upstream release tag)
+#
+# NOTE: deliberately no `push: tags` trigger. The release step creates
+# `build-<ver>-<run>` tags, which would re-trigger the workflow forever.
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Upstream git ref to build"
-        required: true
-        default: "dev"
-      rpm_version:
-        description: "Version string for the rpm (empty = read from source)"
+        description: "Upstream git ref (empty = latest release tag)"
         required: false
         default: ""
-  push:
-    tags:
-      - "build-*"
+  schedule:
+    - cron: "0 20 * * *"   # 20:00 UTC = 04:00 Asia/Shanghai
 
 permissions:
   contents: write
+
+concurrency:
+  # a second build would fight over 4 cores and RAM during linking
+  group: ayugram-rpm
+  cancel-in-progress: false
 
 env:
   UPSTREAM: https://github.com/AyuGram/AyuGramDesktop.git
@@ -30,10 +35,51 @@ env:
   API_HASH: b18441a1ff607e10a989891a5462e627
 
 jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.q.outputs.version }}
+      ref: ${{ steps.q.outputs.ref }}
+      build: ${{ steps.q.outputs.build }}
+    steps:
+      - name: Look for an unbuilt upstream release
+        id: q
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh api repos/AyuGram/AyuGramDesktop/releases/latest --jq .tag_name)
+          VER="${TAG#v}"
+          echo "latest upstream: $TAG ($VER)"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+
+          # our own releases are tagged build-<version>-<run number>
+          BUILT=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                    --jq '.[].tag_name' 2>/dev/null \
+                  | grep -cE "^build-${VER//./\\.}-[0-9]+$" || true)
+          if [ "${BUILT:-0}" -gt 0 ]; then
+            echo "$VER already packaged ($BUILT build(s)) — nothing to do"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$VER not packaged yet — will build"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: check
+    if: github.event_name == 'workflow_dispatch' || needs.check.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 300
     steps:
+      - name: Resolve upstream ref
+        id: ref
+        run: |
+          REF="${{ inputs.ref }}"
+          [ -n "$REF" ] || REF="${{ needs.check.outputs.ref }}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "building ref: $REF"
+
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -47,8 +93,8 @@ jobs:
 
       - name: Clone upstream with submodules
         run: |
-          REF="${{ github.event.inputs.ref || 'dev' }}"
-          # a full clone: shallow clones of this repo break submodules pinned to
+          REF="${{ steps.ref.outputs.ref }}"
+          # full clone: shallow clones of this repo break submodules pinned to
           # commits that are not the branch tip ("reference is not a tree")
           git clone --recursive --jobs 8 --branch "$REF" "$UPSTREAM" tdesktop
           cd tdesktop
@@ -56,7 +102,7 @@ jobs:
           git submodule status --recursive | head -30
 
       - name: Build tlottie static lib
-        # The published centos_env image has tlottie.h but no libtlottie.a
+        # The published centos_env image ships tlottie.h but no libtlottie.a
         # (its build history has no tlottie stage), so AyuGram's tree cannot
         # configure against it. Rebuild the lib exactly as the Dockerfile does.
         run: |
@@ -103,7 +149,7 @@ jobs:
 
       - name: Upload raw binary
         # Keep the compiled binary before packaging: a packaging bug must not
-        # throw away a two hour build again.
+        # throw away a two hour build.
         run: |
           VERSION=$(sed -n 's/^AppVersionStrSmall[[:space:]]*//p' tdesktop/Telegram/build/version | tr -d '[:space:]')
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -113,6 +159,14 @@ jobs:
           tar -C dist -czf "dist/AyuGram-${VERSION}-linux-x86_64.tar.gz" AyuGram
           ls -lh dist/
         continue-on-error: true
+
+      - name: Save the binary as an artifact (before any packaging step)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ayugram-binary-${{ env.VERSION }}
+          path: dist/*.tar.gz
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Package RPM
         run: |
@@ -223,6 +277,26 @@ jobs:
           '
           ls -lh dist/
 
+      - name: Smoke test the package
+        # Real install in a clean Fedora container: dnf has to resolve every
+        # soname requirement, and the binary has to link once installed.
+        run: |
+          docker run --rm -v "$PWD/dist:/d:ro" -w /d fedora:latest bash -lc '
+            set -euo pipefail
+            RPM=$(ls *.rpm)
+            echo "--- info ---";    rpm -qpi "$RPM" | head -12
+            echo "--- requires ---"; rpm -qp --requires "$RPM" | grep -v "^rpmlib"
+            echo "--- files ---";   rpm -qplv "$RPM"
+            echo "--- install ---"
+            dnf -y -q install "./$RPM"
+            test -x /usr/bin/AyuGram
+            if ldd /usr/bin/AyuGram | grep "not found"; then
+              echo "unresolved libraries"; exit 1
+            fi
+            /usr/bin/AyuGram -version 2>/dev/null || true
+            echo "install + link OK"
+          '
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -239,7 +313,7 @@ jobs:
           TAG="build-${{ env.VERSION }}-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" dist/*.rpm dist/AyuGram-*.tar.gz \
             --title "AyuGram Desktop ${VERSION} RPM" \
-            --notes "Built from ${{ github.event.inputs.ref || 'dev' }} on $(date -u +%F)." \
+            --notes "Built from upstream \`${{ steps.ref.outputs.ref }}\` on $(date -u +%F)." \
             --repo "$GITHUB_REPOSITORY"
           echo "RELEASE_URL=https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_ENV"
 
@@ -248,6 +322,7 @@ jobs:
           {
             echo "### AyuGram Desktop $VERSION"
             echo ""
-            echo "- source ref: \`${{ github.event.inputs.ref || 'dev' }}\`"
+            echo "- upstream ref: \`${{ steps.ref.outputs.ref }}\`"
             echo "- release: $RELEASE_URL"
+            echo "- artifact: \`ayugram-desktop-${VERSION}-1.fc45.x86_64.rpm\`"
           } >> "$GITHUB_STEP_SUMMARY"
