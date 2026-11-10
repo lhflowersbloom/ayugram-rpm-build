@@ -1,0 +1,59 @@
+name: Lint spec
+
+# Parses packaging/ayugram-desktop.spec the same way the build does, so a typo
+# or a broken macro fails in 30 seconds instead of after a two-hour compile.
+# The real build only runs when upstream tags a release; this runs on every
+# change to the spec or the workflow.
+
+on:
+  push:
+    paths:
+      - 'packaging/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    name: rpmspec -P
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse the spec with the same defines the build passes
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/w" -w /w fedora:latest bash -lc '
+            set -euo pipefail
+            dnf -y -q install rpm-build >/dev/null
+
+            # Mirror the build: copy the spec, inject the ldd-derived Requires
+            # lines, then parse. A marker that no longer matches shows up as a
+            # failed grep rather than a silently dependency-free package.
+            cp packaging/ayugram-desktop.spec /tmp/check.spec
+            printf "Requires:       libX11.so.6\nRequires:       libfontconfig.so.1\n" > /tmp/reqs.txt
+            sed -i "/^# @LDD_REQUIRES@\$/r /tmp/reqs.txt" /tmp/check.spec
+            sed -i "/^# @LDD_REQUIRES@\$/d" /tmp/check.spec
+            grep -q "libfontconfig.so.1" /tmp/check.spec || { echo "LDD_REQUIRES marker not found"; exit 1; }
+
+            rpmspec -P --define "aver 7.2.9" --define "arel 12" /tmp/check.spec > /tmp/parsed.spec
+            grep -E "^(Name|Version|Release|BuildArch|AutoReqProv):" /tmp/parsed.spec
+            echo "--- runtime requires ---"
+            grep -E "^Requires:" /tmp/parsed.spec
+          '
+
+      - name: The spec must fail without a version
+        # Version has no default on purpose; a bare rpmbuild should complain
+        # instead of shipping a 0-version package.
+        run: |
+          set -euo pipefail
+          if docker run --rm -v "$PWD:/w" -w /w fedora:latest bash -lc '
+               dnf -y -q install rpm-build >/dev/null
+               rpmspec -P /w/packaging/ayugram-desktop.spec >/dev/null
+             '; then
+            echo "spec parsed without --define aver: the version default is missing"
+            exit 1
+          fi
+          echo OK
