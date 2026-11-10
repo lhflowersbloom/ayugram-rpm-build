@@ -187,7 +187,8 @@ jobs:
           tar -C stage -czf stage.tgz .
           ls -lh stage.tgz
 
-          docker run --rm -u 0 -e VERSION="$VERSION" -v "$PWD:/w" -w /w fedora:latest bash -lc '
+          docker run --rm -u 0 -e VERSION="$VERSION" -e AREL="${GITHUB_RUN_NUMBER}" \
+            -v "$PWD:/w" -w /w fedora:latest bash -lc '
             set -euo pipefail
             dnf -y -q install rpm-build binutils >/dev/null
             # rpmbuild resolves %{SOURCESx} under <topdir>/SOURCES (uppercase)
@@ -197,81 +198,25 @@ jobs:
 
             # strip before packaging: brp-strip would need a full toolchain
             strip --strip-unneeded AyuGram
-            REQ=""
+            # Runtime deps come from ldd and are injected at the @LDD_REQUIRES@
+            # marker in packaging/ayugram-desktop.spec, so the spec body itself
+            # is never expanded by the shell.
+            REQF=/tmp/r/ldd-requires.txt
+            : > "$REQF"
             for s in $(ldd AyuGram | awk "/=>/ {print \$1}" | sort -u); do
               case "$s" in
                 libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libmvec.so.*|libresolv.so.*|libutil.so.*) continue ;;
               esac
-              REQ="${REQ}Requires:       ${s}\n"
+              echo "Requires:       $s" >> "$REQF"
             done
 
-            cat > /tmp/r/SPECS/ayugram-desktop.spec <<SPEC
-          Name:           ayugram-desktop
-          Version:        ${VERSION}
-          Release:        1%{?dist}
-          Summary:        AyuGram Desktop - Telegram Desktop fork with Ghost mode
-          License:        GPL-3.0-or-later
-          URL:            https://github.com/AyuGram/AyuGramDesktop
-          Source0:        AyuGram
-          Source1:        com.ayugram.desktop.desktop
-          Source2:        com.ayugram.desktop.metainfo.xml
-          Source3:        com.ayugram.desktop.service
-          Source4:        icon16.png
-          Source5:        icon32.png
-          Source6:        icon48.png
-          Source7:        icon64.png
-          Source8:        icon128.png
-          Source9:        icon256.png
-          Source10:       icon512.png
-          BuildArch:      x86_64
-          AutoReqProv:    no
-          $(printf "%b" "$REQ")
-          Requires:       glibc >= 2.28
+            cp /w/packaging/ayugram-desktop.spec /tmp/r/SPECS/ayugram-desktop.spec
+            sed -i "/^# @LDD_REQUIRES@\$/r ${REQF}" /tmp/r/SPECS/ayugram-desktop.spec
+            sed -i "/^# @LDD_REQUIRES@\$/d" /tmp/r/SPECS/ayugram-desktop.spec
 
-          %description
-          AyuGram Desktop is an unofficial Telegram Desktop fork with Ghost mode,
-          anti-recall and extended customisation. Linux build.
-
-          %prep
-          %build
-          %install
-          umask 022
-          install -d %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications \
-                     %{buildroot}%{_datadir}/metainfo %{buildroot}%{_datadir}/dbus-1/services
-          for d in 16x16 32x32 48x48 64x64 128x128 256x256 512x512; do
-            install -d %{buildroot}%{_datadir}/icons/hicolor/\$d/apps
-          done
-          install -m 0755 %{SOURCE0} %{buildroot}%{_bindir}/AyuGram
-          install -m 0644 %{SOURCE1} %{buildroot}%{_datadir}/applications/
-          install -m 0644 %{SOURCE2} %{buildroot}%{_datadir}/metainfo/
-          install -m 0644 %{SOURCE3} %{buildroot}%{_datadir}/dbus-1/services/
-          install -m 0644 %{SOURCE4} %{buildroot}%{_datadir}/icons/hicolor/16x16/apps/com.ayugram.desktop.png
-          install -m 0644 %{SOURCE5} %{buildroot}%{_datadir}/icons/hicolor/32x32/apps/com.ayugram.desktop.png
-          install -m 0644 %{SOURCE6} %{buildroot}%{_datadir}/icons/hicolor/48x48/apps/com.ayugram.desktop.png
-          install -m 0644 %{SOURCE7} %{buildroot}%{_datadir}/icons/hicolor/64x64/apps/com.ayugram.desktop.png
-          install -m 0644 %{SOURCE8} %{buildroot}%{_datadir}/icons/hicolor/128x128/apps/com.ayugram.desktop.png
-          install -m 0644 %{SOURCE9} %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/com.ayugram.desktop.png
-          install -m 0644 %{SOURCE10} %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/com.ayugram.desktop.png
-
-          %post
-          [ -x /usr/bin/gtk-update-icon-cache ] && /usr/bin/gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor 2>/dev/null || :
-          [ -x /usr/bin/update-desktop-database ] && /usr/bin/update-desktop-database -q %{_datadir}/applications 2>/dev/null || :
-
-          %postun
-          [ -x /usr/bin/gtk-update-icon-cache ] && /usr/bin/gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor 2>/dev/null || :
-
-          %files
-          %{_bindir}/AyuGram
-          %{_datadir}/applications/com.ayugram.desktop.desktop
-          %{_datadir}/metainfo/com.ayugram.desktop.metainfo.xml
-          %{_datadir}/dbus-1/services/com.ayugram.desktop.service
-          %{_datadir}/icons/hicolor/*/apps/com.ayugram.desktop.png
-
-          %changelog
-          * Thu Nov 05 2026 CI <ci@localhost> - ${VERSION}-1
-          - Built from upstream sources
-          SPEC
-            rpmbuild -bb --define "_topdir /tmp/r" --define "debug_package %{nil}" \
+            rpmbuild -bb --define "_topdir /tmp/r" \
+                     --define "aver ${VERSION}" \
+                     --define "arel ${AREL}" \
                      /tmp/r/SPECS/ayugram-desktop.spec
             cp /tmp/r/RPMS/x86_64/*.rpm /w/dist/
           '
@@ -323,5 +268,5 @@ jobs:
             echo ""
             echo "- upstream ref: \`${{ steps.ref.outputs.ref }}\`"
             echo "- release: $RELEASE_URL"
-            echo "- artifact: \`ayugram-desktop-${VERSION}-1.fc45.x86_64.rpm\`"
+            echo "- artifact: \`$(ls dist/*.rpm | xargs -n1 basename)\`"
           } >> "$GITHUB_STEP_SUMMARY"
