@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AyuGram RPM for Fedora — install AyuGram Desktop with dnf</title>
+<meta name="description" content="Fedora RPM builds of AyuGram Desktop, the Telegram fork with Ghost mode and anti-recall. Compiled from upstream sources on GitHub Actions with static Qt, one binary for glibc 2.28 and newer, plus a portable tarball.">
+<link rel="canonical" href="https://lhflowersbloom.github.io/ayugram-rpm-build/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AyuGram RPM for Fedora">
+<meta property="og:description" content="Install AyuGram Desktop (Telegram fork with Ghost mode) from an RPM on Fedora and newer glibc systems. Compiled from upstream source, smoke tested with dnf.">
+<meta property="og:url" content="https://lhflowersbloom.github.io/ayugram-rpm-build/">
+<meta name="twitter:card" content="summary">
+<style>
+  :root{
+    --bg:#ffffff; --panel:#f6f8fa; --ink:#1f2328; --muted:#59636e;
+    --line:#d1d9e0; --accent:#8250df; --accent-soft:#fbefff; --accent-line:#e5c9ff;
+    --code-bg:#0d1117; --code-ink:#e6edf3;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 var(--sans);}
+  .wrap{max-width:820px;margin:0 auto;padding:0 24px}
+  header{padding:56px 0 8px}
+  .eyebrow{font:600 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  h1{font-size:34px;line-height:1.2;letter-spacing:-.02em;margin:14px 0 12px;font-weight:700}
+  h1 .hl{color:var(--accent)}
+  .lede{font-size:18px;color:var(--muted);margin:0 0 22px;max-width:62ch}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;padding:0;list-style:none}
+  .chips li{font:500 12.5px/1 var(--mono);color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 11px}
+  h2{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  p{margin:0 0 14px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .code{position:relative;background:var(--code-bg);border-radius:10px;padding:16px 18px;overflow-x:auto;margin:0 0 14px}
+  .code code{font:13.5px/1.7 var(--mono);color:var(--code-ink);white-space:pre}
+  .code .c{color:#8b949e}
+  .code .p{color:#7ee787}
+  .note{background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:10px;padding:14px 16px;font-size:14.5px;margin:0 0 14px}
+  .note b{font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:0 0 14px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font:600 12px/1.2 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+  td code,p code,li code{font:12.5px/1.4 var(--mono);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  ul{padding-left:20px;margin:0 0 14px}
+  li{margin:0 0 7px}
+  .cta{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 8px}
+  .btn{display:inline-block;background:#1f883d;color:#fff;font-weight:600;font-size:15px;padding:11px 18px;border-radius:8px}
+  .btn:hover{text-decoration:none;background:#1a7f37}
+  .btn.alt{background:var(--panel);color:var(--ink);border:1px solid var(--line)}
+  .btn.alt:hover{background:#eef1f4}
+  details{border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 10px}
+  details summary{cursor:pointer;font-weight:600;font-size:15px}
+  details p{margin:10px 0 0;color:#37414b;font-size:14.5px}
+  footer{margin:56px 0 0;padding:22px 0 60px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted)}
+  footer a{color:var(--muted);text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Fedora · RHEL-family · glibc ≥ 2.28</div>
+  <h1><span class="hl">AyuGram RPM</span> for Fedora</h1>
+  <p class="lede">AyuGram Desktop gives you Ghost mode, anti-recall and heavier customisation on top of Telegram.
+  Upstream only ships macOS and Windows builds — for Linux it publishes source. These RPMs are compiled from that source
+  on GitHub Actions and smoke tested with a real <code>dnf install</code>.</p>
+  <ul class="chips">
+    <li>x86_64</li><li>static Qt</li><li>built from source</li><li>GPL-3.0-or-later</li>
+  </ul>
+</header>
+
+<h2>Install</h2>
+<div class="cta">
+  <a class="btn" href="https://github.com/lhflowersbloom/ayugram-rpm-build/releases/latest">Download the latest RPM</a>
+  <a class="btn alt" href="https://github.com/lhflowersbloom/ayugram-rpm-build">Source repository</a>
+</div>
+<div class="code"><code><span class="c"># two options, both single commands</span>
+sudo dnf install ./ayugram-desktop-<span class="p">&lt;version&gt;</span>.x86_64.rpm   <span class="c"># local file</span>
+sudo dnf install https://github.com/lhflowersbloom/ayugram-rpm-build/releases/latest/download/ayugram-desktop-<span class="p">&lt;version&gt;</span>.fc45.x86_64.rpm   <span class="c"># straight from the release</span></code></div>
+<p>Launch it with <code>ayugram-desktop</code> or from the app menu as <strong>AyuGram Desktop</strong>. No repository to add,
+no Flatpak runtime to pull.</p>
+<div class="note">
+  <b>Same package name as the RPM Fusion build.</b> RPM Fusion also ships an <code>ayugram-desktop</code> package, so
+  <code>dnf</code> treats this file as the same package rather than a second one — remove the RPM Fusion build first if you
+  want to switch, and do not expect the two to coexist.
+</div>
+
+<h2>Why build it yourself</h2>
+<ul>
+  <li><strong>Upstream has no Linux binary.</strong> AyuGram publishes <code>.dmg</code> and <code>.zip</code> only; Linux users are pointed at the source. This closes that gap with a real package.</li>
+  <li><strong>Static Qt, low dependency surface.</strong> The binary is linked against a static Qt, so the RPM does not chase Fedora's Qt updates between releases. Runtime needs are pinned by soname plus <code>glibc ≥ 2.28</code>.</li>
+  <li><strong>Verified, not assumed.</strong> Every package is installed with <code>dnf</code> inside a clean <code>fedora:latest</code> container, so soname resolution and linking are actually exercised before a release is published.</li>
+  <li><strong>A portable fallback.</strong> Each release also carries <code>AyuGram-&lt;version&gt;-linux-x86_64.tar.gz</code> — same binary, no install needed.</li>
+</ul>
+
+<h2>What gets installed</h2>
+<table>
+  <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>/usr/bin/AyuGram</code></td><td>the client binary</td></tr>
+    <tr><td><code>/usr/share/applications/com.ayugram.desktop.desktop</code></td><td>app menu entry</td></tr>
+    <tr><td><code>/usr/share/metainfo/com.ayugram.desktop.metainfo.xml</code></td><td>AppStream data</td></tr>
+    <tr><td><code>/usr/share/dbus-1/services/com.ayugram.desktop.service</code></td><td>D-Bus activation</td></tr>
+    <tr><td><code>/usr/share/icons/hicolor/*/apps/</code></td><td>icons, 16 px to 512 px</td></tr>
+  </tbody>
+</table>
+
+<h2>How it is built</h2>
+<div class="code"><code>upstream releases/latest ──▶ already packaged? ──yes──▶ stop (10 s)
+                                       │no
+                                       ▼
+   clone upstream ──▶ build libtlottie.a ──▶ cmake + ninja ──▶ strip
+   ──▶ rpmbuild ──▶ dnf install in fedora:latest ──▶ GitHub release</code></div>
+<p>A scheduled workflow checks upstream <strong>every day at 20:00 UTC (04:00 Asia/Shanghai)</strong> and only runs the
+full build when it finds a version without a <code>build-&lt;version&gt;-N</code> tag here. The compile itself takes roughly
+110 minutes on a 4-core runner, so the stripped binary is uploaded as an artifact the moment it is built — a packaging
+failure never costs a second two-hour compile.</p>
+
+<h2>Questions</h2>
+<details>
+  <summary>Is this the same as the RPM Fusion package?</summary>
+  <p>No, they are independent builds from the same upstream source with different Qt linkage and dependency pinning.
+  They share the package name <code>ayugram-desktop</code>, so install one or the other — not both.</p>
+</details>
+<details>
+  <summary>Why not just use the Flatpak or the AppImage?</summary>
+  <p>Use whichever fits. The reason this exists is that no Fedora-native RPM of the current upstream release was available,
+  and a package that <code>dnf</code> resolves and tests is easier to reason about than a portable binary.</p>
+</details>
+<details>
+  <summary>Does Ghost mode mean my account is safe?</summary>
+  <p>No. AyuGram uses the official Telegram API credentials and pretends to be a regular client, but you are still running
+  an unofficial client — use it at your own risk. This page only packages what upstream publishes; it does not change behaviour.</p>
+</details>
+<details>
+  <summary>How do I uninstall it?</summary>
+  <p><code>sudo dnf remove ayugram-desktop</code>. Session data lives under <code>~/.local/share</code> and is untouched by the package.</p>
+</details>
+
+<footer>
+  Unofficial build, not affiliated with AyuGram or Telegram ·
+  <a href="https://github.com/lhflowersbloom/ayugram-rpm-build">GitHub</a> ·
+  <a href="https://github.com/AyuGram/AyuGramDesktop">upstream AyuGram</a>
+</footer>
+
+</div>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "AyuGram Desktop RPM",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "Fedora, RHEL-family, glibc 2.28+",
+      "softwareVersion": "7.2.9",
+      "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "url": "https://lhflowersbloom.github.io/ayugram-rpm-build/",
+      "downloadUrl": "https://github.com/lhflowersbloom/ayugram-rpm-build/releases/latest",
+      "description": "Fedora RPM builds of AyuGram Desktop, the Telegram fork with Ghost mode and anti-recall, compiled from upstream source with static Qt."
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is this the same as the RPM Fusion ayugram-desktop package?",
+          "acceptedAnswer": {"@type": "Answer", "text": "No. They are independent builds from the same upstream source with different Qt linkage and dependency pinning. Both use the package name ayugram-desktop, so install one or the other."}
+        },
+        {
+          "@type": "Question",
+          "name": "How do I install AyuGram Desktop on Fedora?",
+          "acceptedAnswer": {"@type": "Answer", "text": "Download ayugram-desktop-<version>.x86_64.rpm from the releases page and run sudo dnf install ./ayugram-desktop-<version>.x86_64.rpm. A portable tar.gz is published alongside it."}
+        },
+        {
+          "@type": "Question",
+          "name": "Does the AyuGram RPM work outside Fedora?",
+          "acceptedAnswer": {"@type": "Answer", "text": "It is built with a static Qt and needs glibc 2.28 or newer, so it applies to RHEL-family distributions of a similar age. It is verified on Fedora with a real dnf install."}
+        }
+      ]
+    }
+  ]
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://lhflowersbloom.github.io/ayugram-rpm-build/sitemap.xml
